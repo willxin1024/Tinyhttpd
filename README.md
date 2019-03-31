@@ -1,3 +1,28 @@
+willxin1024 批注：
+
+1、代码的难点在于父子进程cgi间的通信，相当于写一个"管道"，将网页前端的input输入框填入的颜色传到cgi脚本，echo "red" |perl color.cgi
+
+2、cgi脚本不一定是perl，也可以是其他的语言，输出至标准输出即可
+
+3、本地编译需要注意的点：
+
+ - htdocs 下的cgi脚本应该拥有执行权限，chmod +x
+ - cgi脚本中开头的魔数(!#/usr/bin/perl)应和系统当前perl二进制程序的位置吻合，建议改为(#!/usr/bin/env perl)
+
+4、关键的地方已经添加注释
+
+5、请将代码参考当前repo下的“HTTP协议解析.mhtml”，理解code。
+
+6、code中有很多不高效的地方值得思考，比如
+
+- write()两次调用，分别写入http-header + http-body的做法性能不高，使用writev()可以"离散读、聚集写"的方式更好(比如 nginx)
+
+
+
+---
+
+
+
 A mirror for tinyhttpd(Tinyhttpd非官方镜像,Fork自[sourceForge](https://sourceforge.net/projects/tiny-httpd/),仅供学习)
 
 测试CGI时需要本机安装PERL，同时安装perl-cgi

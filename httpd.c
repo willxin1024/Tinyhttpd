@@ -68,14 +68,23 @@ void accept_request(void *arg)
 
     numchars = get_line(client, buf, sizeof(buf));
     i = 0; j = 0;
+    
+    // ISspace => int isspace(int c);
+    // checks  for  white-space  characters.   In the "C" and "POSIX" locales, these are: space
+    // form-feed ('\f'), newline('\n'), carriage return ('\r'), horizontal tab ('\t'), and vertical tab ('\v').
+    // 读取第一个空格之前的数据：即协议
+    // GET /test?a=3&b=4 HTTP/1.1
     while (!ISspace(buf[i]) && (i < sizeof(method) - 1))
     {
         method[i] = buf[i];
         i++;
     }
+   
+    
     j=i;
     method[i] = '\0';
 
+    // 忽略大小写比较是否为get或post方法，其他方法返回未实现
     if (strcasecmp(method, "GET") && strcasecmp(method, "POST"))
     {
         unimplemented(client);
@@ -86,8 +95,11 @@ void accept_request(void *arg)
         cgi = 1;
 
     i = 0;
+    // 跳过空格
     while (ISspace(buf[j]) && (j < numchars))
         j++;
+    
+    // 读取第二个空格之前的数据：即url路径
     while (!ISspace(buf[j]) && (i < sizeof(url) - 1) && (j < numchars))
     {
         url[i] = buf[j];
@@ -107,27 +119,43 @@ void accept_request(void *arg)
             query_string++;
         }
     }
-
+    
+    /*
+        url:/
+        path:htdocs/
+        url:/132/
+        path:htdocs/132/
+        url:/132
+        path:htdocs/132    
+    */
+    
     sprintf(path, "htdocs%s", url);
+    printf("path:%s\n",path);
     if (path[strlen(path) - 1] == '/')
         strcat(path, "index.html");
+    //如果无/后缀，需要判断为文件还是文件夹
     if (stat(path, &st) == -1) {
+        // 读取至buf不为\n
         while ((numchars > 0) && strcmp("\n", buf))  /* read & discard headers */
             numchars = get_line(client, buf, sizeof(buf));
-        not_found(client);
+        not_found(client); // 找不到
     }
     else
     {
+        // 如果是文件夹
         if ((st.st_mode & S_IFMT) == S_IFDIR)
             strcat(path, "/index.html");
+        
+        // 如果是文件，检查能否执行
         if ((st.st_mode & S_IXUSR) ||
                 (st.st_mode & S_IXGRP) ||
                 (st.st_mode & S_IXOTH)    )
             cgi = 1;
+            
         if (!cgi)
-            serve_file(client, path);
+            serve_file(client, path); // 普通文件
         else
-            execute_cgi(client, path, method, query_string);
+            execute_cgi(client, path, method, query_string); // query_string样例：a=3&b=4
     }
 
     close(client);
@@ -163,8 +191,9 @@ void bad_request(int client)
 void cat(int client, FILE *resource)
 {
     char buf[1024];
-
+    // **由于feof当resource包含EOF时才推出，所以应提前读一次**
     fgets(buf, sizeof(buf), resource);
+    // 如果文件结束，则返回非0值，否则返回0
     while (!feof(resource))
     {
         send(client, buf, strlen(buf), 0);
@@ -231,9 +260,13 @@ void execute_cgi(int client, const char *path,
         {
             buf[15] = '\0';
             if (strcasecmp(buf, "Content-Length:") == 0)
-                content_length = atoi(&(buf[16]));
+            {
+                // printf("get_line content_length: %s\n",buf);
+                content_length = atoi(&(buf[16])); //atoi自动trim
+            }
             numchars = get_line(client, buf, sizeof(buf));
         }
+        // printf("content_length: %d\n",content_length);
         if (content_length == -1) {
             bad_request(client);
             return;
@@ -265,8 +298,8 @@ void execute_cgi(int client, const char *path,
         char query_env[255];
         char length_env[255];
 
-        dup2(cgi_output[1], STDOUT);
-        dup2(cgi_input[0], STDIN);
+        dup2(cgi_output[1], STDOUT); // cgi将stdout挂到cgi_output[1]pipe写端
+        dup2(cgi_input[0], STDIN); // cgi将stdin挂到cgi_input[0]pipe读端
         close(cgi_output[0]);
         close(cgi_input[1]);
         sprintf(meth_env, "REQUEST_METHOD=%s", method);
@@ -323,6 +356,7 @@ int get_line(int sock, char *buf, int size)
         /* DEBUG printf("%02X\n", c); */
         if (n > 0)
         {
+            // 如果是\r，检查其后是否为\n，不论是否为\n都替换为\n
             if (c == '\r')
             {
                 n = recv(sock, &c, 1, MSG_PEEK);
@@ -332,12 +366,14 @@ int get_line(int sock, char *buf, int size)
                 else
                     c = '\n';
             }
+            // 忽略\r
             buf[i] = c;
             i++;
         }
         else
             c = '\n';
     }
+    // 本函数只读取到内容至\r\n结尾
     buf[i] = '\0';
 
     return(i);
@@ -399,6 +435,15 @@ void not_found(int client)
 /**********************************************************************/
 void serve_file(int client, const char *filename)
 {
+    /*
+        url:/
+        path:htdocs/
+        url:/132/
+        path:htdocs/132/
+        url:/132
+        path:htdocs/132    
+    */
+    
     FILE *resource = NULL;
     int numchars = 1;
     char buf[1024];
@@ -464,8 +509,25 @@ int startup(u_short *port)
 /**********************************************************************/
 void unimplemented(int client)
 {
+   
+/* response样例：
+< HTTP/1.1 302 Moved Temporarily
+< Server: stgw/1.3.10.6_1.13.5
+< Date: Mon, 25 Mar 2019 08:50:43 GMT
+< Content-Type: text/html
+< Content-Length: 169
+< Connection: keep-alive
+< Location: https://www.qq.com/?q=a
+< 
+<html>
+<head><title>302 Found</title></head>
+<body bgcolor="white">
+<center><h1>302 Found</h1></center>
+<hr><center>stgw/1.3.10.6_1.13.5</center>
+</body>
+</html>
+*/
     char buf[1024];
-
     sprintf(buf, "HTTP/1.0 501 Method Not Implemented\r\n");
     send(client, buf, strlen(buf), 0);
     sprintf(buf, SERVER_STRING);
@@ -489,7 +551,7 @@ void unimplemented(int client)
 int main(void)
 {
     int server_sock = -1;
-    u_short port = 4000;
+    u_short port = 8800;
     int client_sock = -1;
     struct sockaddr_in client_name;
     socklen_t  client_name_len = sizeof(client_name);
